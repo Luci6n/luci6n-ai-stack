@@ -94,6 +94,29 @@ else
   echo "Wrote $DEST"
 fi
 
+# ---- 5. per-launch theme rotation hook -------------------------------------
+# coralline.conf looks its session up in theme-rotation.state; this SessionStart hook
+# advances that rotation once per launch/resume (rotate-theme.sh).
+step "Installing theme-rotation hook"
+if [ ! -f "$HERE/rotate-theme.sh" ]; then
+  warn "rotate-theme.sh not found next to this script: skipping the per-launch hook (themes will only change per new session)."
+else
+  HOOK_DEST="$CLAUDE_DIR/coralline/rotate-theme.sh"
+  tr -d '\r' < "$HERE/rotate-theme.sh" > "$HOOK_DEST"
+  chmod +x "$HOOK_DEST"
+  echo "Wrote $HOOK_DEST"
+  SETTINGS="$CLAUDE_DIR/settings.json"
+  HOOK_CMD='bash ~/.claude/coralline/rotate-theme.sh'
+  [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+  if jq -e --arg c "$HOOK_CMD" '[.hooks.SessionStart[]?.hooks[]? | select(.command == $c)] | length > 0' "$SETTINGS" >/dev/null 2>&1; then
+    echo "SessionStart hook already present in settings.json."
+  else
+    cp "$SETTINGS" "$SETTINGS.bak.$STAMP"
+    jq --arg c "$HOOK_CMD" '.hooks.SessionStart = ((.hooks.SessionStart // []) + [{matcher: "startup|resume", hooks: [{type: "command", command: $c}]}])' "$SETTINGS.bak.$STAMP" > "$SETTINGS"
+    echo "Added SessionStart hook to $SETTINGS"
+  fi
+fi
+
 # ---- done ------------------------------------------------------------------
 step "Done"
 echo "Restart Claude Code to see the new statusline."

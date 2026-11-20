@@ -147,6 +147,39 @@ else {
     Write-Host "Wrote $dest"
 }
 
+# ---- 5. per-launch theme rotation hook -------------------------------------
+# coralline.conf looks its session up in theme-rotation.state; this SessionStart hook
+# advances that rotation once per launch/resume (rotate-theme.sh).
+Write-Step 'Installing theme-rotation hook'
+$hookSrc = Join-Path $Here 'rotate-theme.sh'
+if (-not (Test-Path $hookSrc)) {
+    Write-Warning 'rotate-theme.sh not found next to this script: skipping the per-launch hook (themes will only change per new session).'
+}
+else {
+    $hookDest = Join-Path $ClaudeDir 'coralline\rotate-theme.sh'
+    [IO.File]::WriteAllBytes($hookDest, [byte[]]([IO.File]::ReadAllBytes($hookSrc) | Where-Object { $_ -ne 13 }))
+    Write-Host "Wrote $hookDest"
+
+    $settingsPath = Join-Path $ClaudeDir 'settings.json'
+    $hookCmd = 'bash ~/.claude/coralline/rotate-theme.sh'
+    $s = if (Test-Path $settingsPath) { Get-Content -Raw $settingsPath | ConvertFrom-Json } else { [pscustomobject]@{} }
+    if (-not $s.PSObject.Properties['hooks']) { $s | Add-Member -NotePropertyName hooks -NotePropertyValue ([pscustomobject]@{}) }
+    $existing = @(); if ($s.hooks.PSObject.Properties['SessionStart']) { $existing = @($s.hooks.SessionStart) }
+    $already = $existing | Where-Object { $_.hooks | Where-Object { $_.command -eq $hookCmd } }
+    if ($already) {
+        Write-Host 'SessionStart hook already present in settings.json.'
+    }
+    else {
+        if (Test-Path $settingsPath) { Copy-Item -LiteralPath $settingsPath -Destination "$settingsPath.bak.$Stamp" }
+        $entry = [pscustomobject]@{ matcher = 'startup|resume'; hooks = @([pscustomobject]@{ type = 'command'; command = $hookCmd }) }
+        $newList = @($existing) + $entry
+        if ($s.hooks.PSObject.Properties['SessionStart']) { $s.hooks.SessionStart = $newList }
+        else { $s.hooks | Add-Member -NotePropertyName SessionStart -NotePropertyValue $newList }
+        [IO.File]::WriteAllText($settingsPath, ($s | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding $false))
+        Write-Host "Added SessionStart hook to $settingsPath"
+    }
+}
+
 # ---- done ------------------------------------------------------------------
 Write-Step 'Done'
 Write-Host 'Restart Claude Code to see the new statusline.'
